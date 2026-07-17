@@ -10,8 +10,9 @@ __pycache__/
 # Crew runtime artifacts
 # persisted FAISS index + chunk cache
 crew/.index/
-# downloaded PDFs
-crew/.papers/
+# downloaded PDFs (keep the sources manifest, ignore the PDFs themselves)
+crew/.papers/*
+!crew/.papers/SOURCES.md
 # session memory sqlite db
 crew/.memory/
 *.sqlite3
