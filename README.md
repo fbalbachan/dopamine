@@ -16,9 +16,9 @@ All code lives under [`crew/`](crew/).
 
 ## Architecture
 
-```mermaid
+
 flowchart TD
-    U([User + session_id]) --> IF[interface.py<br/>CLI / REPL]
+    U([User + session_id]) --> IF[interface.py CLI / REPL]
     IF --> ASK["DopamineCrew.ask()"]
 
     subgraph ORCH["Orchestrator (chat.py)"]
@@ -54,7 +54,7 @@ flowchart TD
     OUT --> U
 
     PDFS[[9 PDFs<br/>rootstrap repo]] -->|"download + page-chunk + embed"| RAG
-```
+
 
 **Flow:** the MemoryKeeper turns a follow-up into a standalone question using the session's history; the scope guardrail refuses anything off-domain before spending tokens; the Retriever plans focused queries and the WebSearcher decides whether the live web is needed, while the **orchestrator executes** the RAG and Brave tools; the Synthesizer writes a grounded answer citing evidence ids; and `_resolve()` rebuilds the `sources` list from the **EvidenceRegistry** (populated by the tools, not the model) so no citation can point at a page or URL that retrieval didn't actually return.
 
