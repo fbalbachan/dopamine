@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Crew runtime artifacts
+# persisted FAISS index + chunk cache
+crew/.index/
+# downloaded PDFs
+crew/.papers/
+# session memory sqlite db
+crew/.memory/
+*.sqlite3
+
+# HuggingFace / model caches
+.cache/
+
+# IDE / local tooling
+.idea/
+.claude/settings.local.json
+.pytest_cache/

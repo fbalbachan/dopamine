@@ -1,0 +1,18 @@
+# --- Orchestration ---
+crewai>=0.86,<1.0
+crewai-tools>=0.17
+
+# --- LLM access (CrewAI talks to Claude through litellm) ---
+litellm>=1.55
+
+# --- RAG layer ---
+sentence-transformers>=3.0      # local embeddings (no API key)
+faiss-cpu>=1.8                  # dense vector index
+rank-bm25>=0.2.2               # lexical retrieval for hybrid search
+pypdf>=4.2                     # page-level PDF text extraction
+
+# --- Infra ---
+python-dotenv>=1.0
+requests>=2.31
+numpy>=1.26
+pydantic>=2.7
