@@ -70,9 +70,35 @@ class Settings:
     # treated as out-of-scope (before we even spend a web search).
     scope_threshold: float = float(os.getenv("SCOPE_THRESHOLD", "0.28"))
 
+    # --- Knowledge graph (crew.graph) ---
+    # Bulk entity extraction is a *parsing* job, not a reasoning one, so it runs
+    # on a cheap model by default. Overridable for quality experiments.
+    graph_extract_model: str = os.getenv("GRAPH_EXTRACT_MODEL", "claude-haiku-4-5")
+    # Reference lists are extracted in batches of this many characters per call.
+    graph_batch_chars: int = int(os.getenv("GRAPH_BATCH_CHARS", "9000"))
+    # A cited work must be seen this many times before it earns a graph node.
+    # 1 keeps the full citation network; raise it to prune one-off mentions.
+    graph_min_mentions: int = int(os.getenv("GRAPH_MIN_MENTIONS", "1"))
+    # Topic assignment (see crew.graph.topics.Taxonomy.assign): a topic must
+    # stand out from the text's own mean similarity by this many standard
+    # deviations, *and* clear the absolute cosine floor.
+    graph_topic_z: float = float(os.getenv("GRAPH_TOPIC_Z", "1.1"))
+    graph_topic_threshold: float = float(os.getenv("GRAPH_TOPIC_THRESHOLD", "0.20"))
+
+    # --- Connection recommender weights (see crew.graph.recommend) ---
+    # Signals are each normalised to [0, 1], then blended with these weights.
+    rec_w_topic: float = float(os.getenv("REC_W_TOPIC", "0.35"))      # shared research interests
+    rec_w_profile: float = float(os.getenv("REC_W_PROFILE", "0.25"))  # profile embedding similarity
+    rec_w_graph: float = float(os.getenv("REC_W_GRAPH", "0.25"))      # co-authorship proximity
+    rec_w_citation: float = float(os.getenv("REC_W_CITATION", "0.15"))  # citation affinity
+    # Recommending a same-institution colleague is usually less useful than
+    # surfacing an external collaborator, so it is discounted (not excluded).
+    rec_same_institution_penalty: float = float(os.getenv("REC_SAME_INST_PENALTY", "0.10"))
+
     # --- Paths (all git-ignored) ---
     papers_dir: Path = field(default_factory=lambda: PACKAGE_ROOT / ".papers")
     index_dir: Path = field(default_factory=lambda: PACKAGE_ROOT / ".index")
+    graph_dir: Path = field(default_factory=lambda: PACKAGE_ROOT / ".graph")
     memory_db: Path = field(default_factory=lambda: PACKAGE_ROOT / ".memory" / "sessions.sqlite3")
 
     @property
@@ -80,8 +106,13 @@ class Settings:
         """Model string CrewAI/litellm expects for Anthropic."""
         return f"anthropic/{self.agent_model}"
 
+    @property
+    def litellm_graph_extract_model(self) -> str:
+        """Model string for the graph's bulk entity extractor."""
+        return f"anthropic/{self.graph_extract_model}"
+
     def ensure_dirs(self) -> None:
-        for p in (self.papers_dir, self.index_dir, self.memory_db.parent):
+        for p in (self.papers_dir, self.index_dir, self.graph_dir, self.memory_db.parent):
             p.mkdir(parents=True, exist_ok=True)
 
 

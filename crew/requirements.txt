@@ -11,6 +11,9 @@ faiss-cpu>=1.8                  # dense vector index
 rank-bm25>=0.2.2               # lexical retrieval for hybrid search
 pypdf>=4.2                     # page-level PDF text extraction
 
+# --- Knowledge graph layer ---
+networkx>=3.0                  # typed graph + spring layout + link prediction
+
 # --- Infra ---
 python-dotenv>=1.0
 requests>=2.31
