@@ -18,9 +18,27 @@ All code lives under [`crew/`](crew/).
 > a knowledge graph that recommends who should connect with whom. Ships with an
 > interactive HTML graph viewer.
 >
+>   A GraphRAG pipeline in crew/graph/ over the same nine PDFs. From a full build: 3,626 scientists, 1,359 papers, 18 institutions, 42,303 edges.                                                                                                                                                                                                                                                                                                           
+  Extraction is split so each half does what it's good at: a cheap model parses the nine incompatible citation styles, and deterministic Python decides which surface forms are the same person. That keeps entity resolution      
+  unit-testable and stable — a rebuild can't silently re-partition the graph.                                                                                                                                                                                                                                                                                                                                                                                       
+  The recommender blends four normalized signals — IDF-weighted topic overlap, profile-embedding similarity, Adamic-Adar over the co-authorship network, and co-citation — and returns the per-signal breakdown plus a rationale   
+  assembled in Python, never by the model. recommend_connections excludes existing co-authors; similar_scientists doesn't. Real output for Schultz: Nathaniel Daw (0.68, bridged via Dayan and Montague), Minoru Kimura, Ray Dolan 
+  — with signals firing independently, Kimura scoring on topic alone and Smith on network alone.  
+> 
+>
 > ```powershell
 > .venv\Scripts\python.exe -m crew.graph.build          # build graph + viewer
 > .venv\Scripts\python.exe -m crew.graph.interface --viz
+>        Explore the scientist graph from the command line.                                                                                                                                                                     
+                                                                                                                                                                                                                                 
+       python -m crew.graph.interface                              # REPL                                                                                                                                                    
+       python -m crew.graph.interface --who "Wolfram Schultz"      # one profile                                                                                                                                             
+       python -m crew.graph.interface --recommend "Josh Berke"     # connections                                                                                                                                             
+       python -m crew.graph.interface --similar "Marc Caron"       # similar profiles                                                                                                                                        
+       python -m crew.graph.interface --topic "Parkinson"          # who works on it                                                                                                                                         
+       python -m crew.graph.interface --institution "Duke"         # who is there                                                                                                                                            
+       python -m crew.graph.interface --stats                      # graph summary                                                                                                                                           
+       python -m crew.graph.interface -q "Who should Berke meet?"  # natural language    
 > ```
 
 ---
