@@ -12,6 +12,17 @@ Every answer is returned as a single **typed dict** (`crew.schema.CrewResponse`)
 
 All code lives under [`crew/`](crew/).
 
+> **Also included: [Scientist GraphRAG](crew/graph/README.md)** — a second
+> surface over the same nine PDFs that extracts the *people*: researcher
+> profiles, institutions, research interests and citation links, assembled into
+> a knowledge graph that recommends who should connect with whom. Ships with an
+> interactive HTML graph viewer.
+>
+> ```powershell
+> .venv\Scripts\python.exe -m crew.graph.build          # build graph + viewer
+> .venv\Scripts\python.exe -m crew.graph.interface --viz
+> ```
+
 ---
 
 ## Architecture
@@ -145,6 +156,13 @@ in-scope test asserts scope *passes*, then stops at the key gate).
 | `tests/test_config.py` | 9 papers pinned, exact filenames, model string |
 | `tests/test_rag_integration.py` | real index: page-level citations, in- vs off-domain scores *(skips if index not built)* |
 | `tests/test_crew_refusal.py` | end-to-end out-of-scope refusal via `DopamineCrew.ask` *(skips if index not built)* |
+| `tests/test_graph_canon.py` | graph entity resolution — one researcher, one node id across all nine citation styles |
+| `tests/test_graph_recommend.py` | recommender policy on a synthetic graph: co-author exclusion, IDF weighting, determinism |
+| `tests/test_graph_grounding.py` | graph answers — invented `[G#]` ids dropped, scores pass through untouched |
+| `tests/test_graph_topics.py` | topic assignment — alias word-boundaries, relative (not absolute) selection |
+| `tests/test_graph_store.py` | graph persistence, lookup, co-authorship projection |
+| `tests/test_graph_viz.py` | viewer export — deterministic layout, tag balance, both theme overrides, payload escaping |
+| `tests/test_graph_extract.py` | extraction leniency — a `null` field must not silently discard a paper's whole author list |
 
 Integration tests skip cleanly when the index hasn't been built; the unit tests
 always run.
@@ -193,6 +211,17 @@ crew/
   scope.py         # out-of-scope guardrail
   schema.py        # TypedDict response contract
   config.py        # settings + paths (reads crew/.env)
+  graph/           # Scientist GraphRAG — see crew/graph/README.md
+    build.py       # `python -m crew.graph.build` — PDFs → knowledge graph
+    extract.py     # LLM extraction of front matter + reference lists
+    canon.py       # name/institution entity resolution (deterministic)
+    topics.py      # research-interest taxonomy + assignment
+    store.py       # ScientistGraph: persistence, lookups, networkx views
+    recommend.py   # multi-signal connection recommender
+    viz.py         # self-contained interactive HTML viewer
+    chat.py        # GraphCrew — natural-language questions over the graph
+    interface.py   # `python -m crew.graph.interface`
+    enrich.py      # optional OpenAlex enrichment (ORCID, h-index)
   requirements.txt
   requirements-dev.txt
   .env.example

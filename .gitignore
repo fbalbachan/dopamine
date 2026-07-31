@@ -13,6 +13,8 @@ crew/.index/
 # downloaded PDFs (keep the sources manifest, ignore the PDFs themselves)
 crew/.papers/*
 !crew/.papers/SOURCES.md
+# knowledge graph build output (graph.json, taxonomy.json, graph.html)
+crew/.graph/
 # session memory sqlite db
 crew/.memory/
 *.sqlite3
