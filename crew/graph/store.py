@@ -57,6 +57,9 @@ class ScientistGraph:
         self._coauthor = None
         self._profile_matrix: Optional[np.ndarray] = None
         self._profile_ids: List[str] = []
+        # (source, target, relation) set, built lazily by enrichment so an
+        # append can check for a duplicate without rescanning ~44k edges.
+        self._edge_index: Optional[set] = None
 
     # -- persistence ---------------------------------------------------------
     @classmethod
@@ -97,6 +100,43 @@ class ScientistGraph:
             encoding="utf-8",
         )
         return path
+
+    # -- post-build mutation -------------------------------------------------
+    def recount_stats(self) -> GraphStats:
+        """Recompute derived counts after nodes or edges changed post-build.
+
+        :func:`crew.graph.enrich.enrich_graph` mutates a graph that was already
+        frozen by ``build._Builder.finish``, adding institutions and
+        ``AFFILIATED_WITH`` edges. Without this the persisted ``stats`` keep
+        describing the graph as it was before the pass — and ``stats`` is what
+        the CLI, the viewer header and ``summary()`` all read.
+
+        Also drops the derived caches (``nx``, the co-authorship projection,
+        profile vectors), since every one of them was built from the old
+        edge list or the old affiliations.
+        """
+        relations: Dict[str, int] = {}
+        for e in self.edges:
+            relations[e["relation"]] = relations.get(e["relation"], 0) + 1
+        self.stats.update({
+            "scientists": len(self.scientists),
+            "corpus_authors": sum(1 for s in self.scientists.values()
+                                  if s["corpus_author"]),
+            "institutions": len(self.institutions),
+            "topics": len(self.topics),
+            "papers": len(self.papers),
+            "corpus_papers": sum(1 for p in self.papers.values() if p["in_corpus"]),
+            "edges": len(self.edges),
+            "relations": relations,
+            "enriched": sum(1 for s in self.scientists.values()
+                            if s.get("external")),
+        })
+        self._nx = None
+        self._coauthor = None
+        self._profile_matrix = None
+        self._profile_ids = []
+        self._edge_index = None
+        return self.stats
 
     # -- networkx views ------------------------------------------------------
     @property

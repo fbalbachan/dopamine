@@ -9,13 +9,21 @@
     python -m crew.graph.interface --stats                      # graph summary
     python -m crew.graph.interface -q "Who should Berke meet?"  # natural language
     python -m crew.graph.interface --viz                        # open the viewer
+    python -m crew.graph.interface --enrich "Marc Caron"        # refresh one profile
+    python -m crew.graph.interface --enrich                     # fill in the missing
 
 REPL commands: ``/who <name>``  ``/rec <name>``  ``/similar <name>``
-``/topic <t>``  ``/inst <i>``  ``/stats``  ``/viz``  ``/json``  ``/quit``.
-Anything else is treated as a natural-language question.
+``/topic <t>``  ``/inst <i>``  ``/enrich [name]``  ``/refresh``  ``/stats``
+``/viz``  ``/json``  ``/quit``. Anything else is a natural-language question.
 
 The structured lookups (``--who``, ``--recommend``, …) are pure graph queries
 and need no API key; only the natural-language path calls Claude.
+
+``--enrich`` is the **on-demand** OpenAlex trigger. Enrichment also runs during
+``crew.graph.build``, but a profile can go stale, or fail to match on the day
+the graph was built, and neither is worth a full rebuild to fix. This path
+updates ``graph.json`` in place; the viewer picks the change up on the next
+``build``, which notices the HTML is older than its source.
 """
 from __future__ import annotations
 
@@ -140,6 +148,53 @@ def print_stats(graph: ScientistGraph) -> None:
         print(f"      {t['label']:48s} {len(t['scientists']):4d} people")
 
 
+def run_enrichment(graph: ScientistGraph, target: Optional[str] = None,
+                   refresh: bool = False) -> bool:
+    """User-triggered OpenAlex refresh. Returns True if the graph was changed.
+
+    Enrichment normally runs as part of ``crew.graph.build``, but a profile can
+    be missing (no match at build time), stale (a year of new citations), or
+    simply not worth a whole rebuild to fix. This is the on-demand path: it
+    mutates the loaded graph, persists it, and leaves the HTML viewer to be
+    re-rendered by the next build, which detects that it is out of date.
+
+    ``target`` is a name to resolve; omitted, it covers every corpus author
+    still lacking a profile.
+    """
+    from .enrich import enrich_graph, enrich_scientist, external_summary
+
+    if target:
+        sid = _resolve_one(graph, target)
+        if not sid:
+            return False
+        name = graph.scientists[sid]["name"]
+        had = bool(graph.scientists[sid].get("external"))
+        print(f"Querying OpenAlex for {name}…")
+        # A single named person is an explicit instruction, so re-fetch even if
+        # a profile is already there — "refresh this one" is the whole point.
+        if not enrich_scientist(graph, sid, refresh=True):
+            print(f"  no confident OpenAlex match for {name} — profile unchanged.")
+            print("  (matching requires the surname to agree; see crew/graph/enrich.py)")
+            return False
+        graph.recount_stats()
+        path = graph.save()
+        verb = "refreshed" if had else "added"
+        print(f"  {verb}: {external_summary(graph.scientists[sid]) or '(no metrics)'}")
+        print(f"  saved to {path}")
+        return True
+
+    scope = "re-fetching every corpus author" if refresh else "filling in what is missing"
+    print(f"Querying OpenAlex — {scope}…")
+    added = enrich_graph(graph, refresh=refresh, log=print)
+    if not added:
+        return False
+    graph.recount_stats()
+    graph.stats["enrich_scope"] = "corpus"
+    path = graph.save()
+    print(f"  saved to {path}")
+    return True
+
+
 def _open_viewer() -> None:
     path = settings.graph_dir / "graph.html"
     if not path.exists():
@@ -158,6 +213,16 @@ def main() -> None:
     parser.add_argument("--institution", help="who is at an institution")
     parser.add_argument("--stats", action="store_true", help="graph summary")
     parser.add_argument("--viz", action="store_true", help="open the HTML viewer")
+    parser.add_argument(
+        "--enrich", nargs="?", const="", metavar="NAME",
+        help="refresh OpenAlex profiles now: a NAME to update one person, or "
+             "bare to fill in every corpus author still missing one",
+    )
+    parser.add_argument(
+        "--refresh-enrich", action="store_true",
+        help="with --enrich and no NAME, re-fetch every profile instead of "
+             "only the missing ones",
+    )
     parser.add_argument("-q", "--question", help="ask a natural-language question")
     parser.add_argument("-n", "--limit", type=int, default=8, help="results to show")
     parser.add_argument("-s", "--session", default=None, help="session id")
@@ -165,7 +230,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.viz and not any([args.who, args.recommend, args.similar, args.topic,
-                             args.institution, args.stats, args.question]):
+                             args.institution, args.stats, args.question,
+                             args.enrich is not None]):
         _open_viewer()
         return
 
@@ -187,6 +253,12 @@ def main() -> None:
         return cached[0]
 
     did_something = False
+
+    # Runs first so a --who/--recommend in the same invocation reads the
+    # refreshed profile rather than the one that was on disk a moment ago.
+    if args.enrich is not None:
+        run_enrichment(graph, args.enrich or None, refresh=args.refresh_enrich)
+        did_something = True
 
     if args.stats:
         print_stats(graph)
@@ -315,6 +387,12 @@ def _repl(graph: ScientistGraph, recommender, session_id: str, as_json: bool) ->
         if line == "/viz":
             _open_viewer()
             continue
+        if line == "/enrich":
+            run_enrichment(graph)
+            continue
+        if line == "/refresh":
+            run_enrichment(graph, refresh=True)
+            continue
         if line == "/json":
             as_json = not as_json
             print(f"json output = {as_json}")
@@ -322,7 +400,9 @@ def _repl(graph: ScientistGraph, recommender, session_id: str, as_json: bool) ->
 
         command, _, argument = line.partition(" ")
         argument = argument.strip()
-        if command == "/who" and argument:
+        if command == "/enrich" and argument:
+            run_enrichment(graph, argument)
+        elif command == "/who" and argument:
             sid = _resolve_one(graph, argument)
             if sid:
                 print_profile(graph, sid)
