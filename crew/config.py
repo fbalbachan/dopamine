@@ -84,6 +84,20 @@ class Settings:
     # deviations, *and* clear the absolute cosine floor.
     graph_topic_z: float = float(os.getenv("GRAPH_TOPIC_Z", "1.1"))
     graph_topic_threshold: float = float(os.getenv("GRAPH_TOPIC_THRESHOLD", "0.20"))
+    # OpenAlex enrichment (see crew.graph.enrich) is **on by default**: it needs
+    # no API key, and ORCID/h-index/ROR affiliations are the fields that turn a
+    # bare name into a profile. Set GRAPH_ENRICH=0 (or `build --no-enrich`) for
+    # a fully offline build; every failure already degrades to "leave the
+    # profile as it was", so the flag is about network policy, not safety.
+    graph_enrich: bool = os.getenv("GRAPH_ENRICH", "1").strip().lower() not in {
+        "0", "false", "no", "off", ""
+    }
+    # Enrichment covers corpus authors only by default — the ~36 people with
+    # real profiles. Covering all ~3,600 cited names is thousands of requests
+    # to decorate nodes that exist mainly as network structure.
+    graph_enrich_all: bool = os.getenv("GRAPH_ENRICH_ALL", "0").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
 
     # --- Connection recommender weights (see crew.graph.recommend) ---
     # Signals are each normalised to [0, 1], then blended with these weights.

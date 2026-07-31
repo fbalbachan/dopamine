@@ -30,11 +30,28 @@ Build variants:
 
 | Command | What it does |
 |---|---|
-| `build` | Full: front matter + every reference list |
+| `build` | Full: front matter + every reference list + OpenAlex profiles |
 | `build --no-refs` | Corpus authors only — fast, ~10 LLM calls |
 | `build --force` | Ignore the corpus hash and rebuild (also re-derives the taxonomy) |
-| `build --enrich` | Add OpenAlex profiles (ORCID, h-index, citation counts) |
+| `build --no-enrich` | Skip OpenAlex — no network calls at all |
+| `build --enrich-all` | Enrich cited researchers too, not just corpus authors |
+| `build --refresh-enrich` | Re-fetch profiles that are already present |
 | `build --no-html` | Skip the viewer |
+
+OpenAlex enrichment is **on by default** and needs no API key. It only ever adds
+fields, and every failure — no network, rate limit, no confident match —
+degrades to "leave this profile as it was", so a build with no network produces
+exactly the graph that was built before enrichment existed. Set `GRAPH_ENRICH=0`
+to turn it off permanently.
+
+Refresh a profile without rebuilding:
+
+```powershell
+.venv\Scripts\python.exe -m crew.graph.interface --enrich "Marc Caron"   # one person
+.venv\Scripts\python.exe -m crew.graph.interface --enrich                # fill the gaps
+```
+
+In the REPL: `/enrich <name>`, `/enrich`, `/refresh`.
 
 ---
 
@@ -156,14 +173,21 @@ APIs are just someone else absorbing that risk. Building on it would mean a
 pipeline that is legally grey, silently rate-limited, and one markup change from
 broken.
 
-**OpenAlex** is used instead (`build --enrich`). It is the open successor to
-Microsoft Academic Graph: ~250M works, no API key, 100k requests/day, CC0 data.
-For this feature it is also a strictly better source — it exposes canonical
-author ids, **ORCID**, last-known institution with a ROR id, topic tags, works
-and citation counts, and an h-index.
+**OpenAlex** is used instead, and it runs by default. It is the open successor
+to Microsoft Academic Graph: ~250M works, no API key, 100k requests/day, CC0
+data. For this feature it is also a strictly better source — it exposes
+canonical author ids, **ORCID**, last-known institution with a ROR id, topic
+tags, works and citation counts, and an h-index.
 
 ORCID matters most: it is the upgrade path for this graph's biggest weakness
 (below).
+
+One guard is worth calling out. OpenAlex's `search` ranks by relevance, not
+identity, so taking the top hit would staple another researcher's h-index onto
+a profile. A candidate is only accepted when its **surname agrees** with the
+query — checked with `canon.parse_name`, the same resolver the graph is built
+with. On the real corpus that matched 36/36 corpus authors, 25 of them with an
+ORCID, and grew the institution count from 19 to 45.
 
 Other legitimate options in the same family, unused but drop-in: Crossref (DOI
 metadata), Semantic Scholar, PubMed E-utilities.
@@ -174,9 +198,10 @@ metadata), Semantic Scholar, PubMed E-utilities.
 
 | Limitation | Impact | Fix |
 |---|---|---|
-| **Names resolve on surname + first initial** | Two distinct `Wang D.` merge into one node | ORCID via `--enrich`; this is the standard bibliometric heuristic without it |
+| **Names resolve on surname + first initial** | Two distinct `Wang D.` merge into one node | ORCID via enrichment; this is the standard bibliometric heuristic without it |
 | A person cited as `Maknoon Razia D` and printed as `Dur E Maknoon Razia` may split | Duplicate nodes for compound surnames | Alias clustering, or ORCID |
-| **Institutions cover corpus authors only** — 100% of the ~36 people who wrote the nine papers, ~1% of all 3,600 | Reference lists print names, never affiliations, so a cited-only researcher has no institution to record | `--enrich` fills these from OpenAlex |
+| **Institutions cover corpus authors only** — 100% of the ~36 people who wrote the nine papers, ~1% of all 3,600 | Reference lists print names, never affiliations, so a cited-only researcher has no institution to record | `--enrich-all` fills these from OpenAlex |
+| Enrichment matches on name, so a common name can match the wrong person | A plausible but wrong h-index (e.g. a corpus author named `Jing Wu`) | Match on ORCID or DOI-linked works rather than a name search |
 | Topics come from titles for cited works | Coarser interests than corpus authors get from abstracts | Fetch abstracts via OpenAlex/Crossref |
 | Co-citation is over nine citing papers | A coarse signal, deliberately weighted lowest | More corpus papers |
 | Reference extraction quality varies | Two-column PDFs interleave entries; some are dropped | Layout-aware extraction (e.g. GROBID) |
@@ -194,7 +219,7 @@ for the same reason: nothing below it can be *justified* without it.
 .venv\Scripts\python.exe -m pytest tests -k graph
 ```
 
-85 tests, no API key, no network, no built graph required. They cover the parts
+120 tests, no API key, no network, no built graph required. They cover the parts
 whose behaviour is guaranteed by code rather than by a language model:
 
 - **`test_graph_canon.py`** — every name string is real, taken from the nine
@@ -215,3 +240,7 @@ whose behaviour is guaranteed by code rather than by a language model:
   fails as a blank page rather than an exception: layout reproducibility, tag
   balance, both theme overrides, and that a `</script>` in a paper title cannot
   break out of the payload.
+- **`test_graph_enrich.py`** — every network call is patched, so what is
+  asserted is the *guards*, not OpenAlex: surname agreement, that offline
+  enrichment leaves the graph byte-identical, that an added institution also
+  gets its `AFFILIATED_WITH` edge, and that `stats` is recounted afterwards.

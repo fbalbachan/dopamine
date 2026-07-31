@@ -41,9 +41,11 @@ class Evidence(TypedDict):
 
 
 class ExternalProfile(TypedDict, total=False):
-    """Optional enrichment from an external scholarly source (OpenAlex).
+    """Enrichment from an external scholarly source (OpenAlex).
 
-    Absent unless the graph was built with ``--enrich``; see
+    Populated by default for corpus authors (``GRAPH_ENRICH=1``); absent when
+    the build ran with ``--no-enrich``, when the network was unavailable, or
+    when no OpenAlex author matched the name confidently enough. See
     :mod:`crew.graph.enrich` for why OpenAlex rather than Google Scholar.
     """
     source: str
@@ -121,8 +123,7 @@ class Edge(TypedDict):
     evidence: List[Evidence]
 
 
-class GraphStats(TypedDict):
-    """Summary counts, written at build time and shown by the CLI/viewer."""
+class _GraphStatsBase(TypedDict):
     scientists: int
     corpus_authors: int
     institutions: int
@@ -133,6 +134,19 @@ class GraphStats(TypedDict):
     relations: Dict[str, int]
     built_from: List[str]        # the PDF filenames the graph was built over
     corpus_hash: str
+
+
+class GraphStats(_GraphStatsBase, total=False):
+    """Summary counts, written at build time and shown by the CLI/viewer.
+
+    ``enriched`` is deliberately outside ``corpus_hash``: enrichment decorates
+    an existing graph rather than changing its structure, so a build that only
+    turns enrichment on must not force a full re-extraction. Instead the
+    builder reads this key to decide whether an already-current graph still
+    needs its OpenAlex pass.
+    """
+    enriched: int                # scientists carrying an `external` profile
+    enrich_scope: str            # "corpus" | "all" — who the pass covered
 
 
 class Signals(TypedDict):

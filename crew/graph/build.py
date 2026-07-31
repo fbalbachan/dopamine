@@ -1,21 +1,30 @@
 """Build the scientist knowledge graph from the nine PDFs.
 
-    python -m crew.graph.build              # full build (front matter + references)
-    python -m crew.graph.build --no-refs    # front matter only — fast and free
-    python -m crew.graph.build --force      # ignore the corpus hash and rebuild
-    python -m crew.graph.build --enrich     # add OpenAlex metadata (see enrich.py)
+    python -m crew.graph.build               # full build (front matter + references)
+    python -m crew.graph.build --no-refs     # front matter only — fast and free
+    python -m crew.graph.build --force       # ignore the corpus hash and rebuild
+    python -m crew.graph.build --no-enrich   # skip OpenAlex — fully offline
+    python -m crew.graph.build --enrich-all  # enrich cited researchers too (slow)
 
 Pipeline
 --------
 1. **Extract** front matter and reference lists per paper (:mod:`.extract`).
 2. **Resolve** every surface form to a canonical id (:mod:`.canon`).
 3. **Assign** research interests from a closed taxonomy (:mod:`.topics`).
-4. **Assemble** typed nodes and evidenced edges, then persist to
+4. **Enrich** profiles from OpenAlex — ORCID, h-index, citation counts,
+   ROR-backed affiliations (:mod:`.enrich`). On by default; no API key needed.
+5. **Assemble** typed nodes and evidenced edges, then persist to
    ``crew/.graph/graph.json`` and render ``graph.html``.
 
 Like ``crew.build_index``, the build is idempotent: a ``corpus_hash`` over the
 PDF names and sizes plus the extraction settings short-circuits a rebuild when
 nothing has changed, so it is safe to run on every deploy.
+
+Enrichment sits *outside* that hash. It decorates nodes rather than creating
+them, so turning it on must not cost a full re-extraction: when the graph is
+already current but unenriched, the builder runs the OpenAlex pass over the
+loaded graph and re-saves. That also means an enriched graph is never
+re-enriched on a no-op build — use ``--force`` to refresh the profiles.
 """
 from __future__ import annotations
 
@@ -275,10 +284,38 @@ class _Builder:
         )
 
 
+def _apply_enrichment(graph: ScientistGraph, enrich_all: bool,
+                      refresh: bool = False) -> int:
+    """Run the OpenAlex pass and record what it covered in ``stats``."""
+    from .enrich import enrich_graph
+
+    scope = "every scientist" if enrich_all else "corpus authors"
+    _log(f"Enriching from OpenAlex ({scope})…")
+    added = enrich_graph(graph, corpus_only=not enrich_all, refresh=refresh,
+                         log=_log)
+    # Enrichment folds in ROR-backed institutions the PDFs never printed, plus
+    # the AFFILIATED_WITH edges that reach them, so every derived count moves.
+    graph.recount_stats()
+    graph.stats["enrich_scope"] = "all" if enrich_all else "corpus"
+    return added
+
+
 def build_graph(force: bool = False, with_refs: bool = True,
-                enrich: bool = False, export_html: bool = True) -> ScientistGraph:
-    """Run the full pipeline and persist the graph."""
+                enrich: Optional[bool] = None, enrich_all: Optional[bool] = None,
+                refresh_enrich: bool = False,
+                export_html: bool = True) -> ScientistGraph:
+    """Run the full pipeline and persist the graph.
+
+    ``enrich``/``enrich_all`` default to ``settings.graph_enrich`` /
+    ``settings.graph_enrich_all`` (env-configurable) when left as ``None``.
+    ``refresh_enrich`` re-fetches profiles that are already present — the
+    "OpenAlex has newer numbers" path, which the idempotency check would
+    otherwise skip.
+    """
     from ..rag import download_papers
+
+    enrich = settings.graph_enrich if enrich is None else enrich
+    enrich_all = settings.graph_enrich_all if enrich_all is None else enrich_all
 
     settings.ensure_dirs()
     paths = download_papers()
@@ -286,13 +323,35 @@ def build_graph(force: bool = False, with_refs: bool = True,
     corpus_hash = _corpus_hash(paths, with_refs)
 
     if not force and graph_path.exists():
+        current = False
         try:
             existing = json.loads(graph_path.read_text(encoding="utf-8"))
-            if existing.get("stats", {}).get("corpus_hash") == corpus_hash:
-                _log(f"Graph is current ({graph_path}). Use --force to rebuild.")
-                return ScientistGraph.load(graph_path)
+            current = existing.get("stats", {}).get("corpus_hash") == corpus_hash
         except Exception:
-            pass
+            current = False
+        if current:
+            graph = ScientistGraph.load(graph_path)
+            # Structure is unchanged, but enrichment is not part of the hash —
+            # so an enrichment that has never run still has work to do, and an
+            # explicit --refresh-enrich always does.
+            if enrich and (refresh_enrich or not graph.stats.get("enriched")):
+                _log(f"Graph structure is current ({graph_path}); "
+                     f"{'refreshing' if refresh_enrich else 'adding'} "
+                     f"OpenAlex profiles.")
+                _apply_enrichment(graph, enrich_all, refresh=refresh_enrich)
+                graph.save()
+                _log(f"  {graph.summary()}")
+                if export_html:
+                    _export_viewer(graph)
+            else:
+                _log(f"Graph is current ({graph_path}). Use --force to rebuild.")
+                # The viewer is a derived artifact: an enrichment pass on an
+                # earlier run updates graph.json and leaves graph.html behind.
+                # Regenerate when it is missing or older than its source.
+                if export_html and _viewer_is_stale(graph_path):
+                    _log("  viewer is out of date — re-rendering.")
+                    _export_viewer(graph)
+            return graph
 
     if not settings.anthropic_api_key:
         _log("! No ANTHROPIC_API_KEY — falling back to heuristic extraction.")
@@ -404,24 +463,35 @@ def build_graph(force: bool = False, with_refs: bool = True,
     _assign_topics(builder, taxonomy, embed)
 
     graph = builder.finish(taxonomy, [p.name for p in paths], corpus_hash)
+
+    # 7. External profiles. Runs before the save so `graph.json` is written
+    # once, complete — and before the viewer, so the HTML carries the profiles.
+    if enrich:
+        _log("")
+        _apply_enrichment(graph, enrich_all, refresh=refresh_enrich)
+
     out = graph.save()
     _log(f"\nGraph written to {out}")
     _log(f"  {graph.summary()}")
 
-    if enrich:
-        from .enrich import enrich_graph
-
-        _log("\nEnriching from OpenAlex…")
-        enrich_graph(graph, log=_log)
-        graph.save()
-
     if export_html:
-        from .viz import export_html as _export
-
-        html = _export(graph, embed=embed)
-        _log(f"  viewer: {html}")
+        _export_viewer(graph, embed=embed)
 
     return graph
+
+
+def _export_viewer(graph: ScientistGraph, embed=None) -> None:
+    from .viz import export_html as _export
+
+    html = _export(graph, embed=embed or default_embedder())
+    _log(f"  viewer: {html}")
+
+
+def _viewer_is_stale(graph_path: Path) -> bool:
+    html = graph_path.with_suffix(".html")
+    if not html.exists():
+        return True
+    return html.stat().st_mtime < graph_path.stat().st_mtime
 
 
 def _link_coauthors(builder: _Builder, author_ids: List[str], ev: Evidence) -> None:
@@ -543,14 +613,33 @@ def main() -> None:
     parser.add_argument("--no-refs", action="store_true",
                         help="skip reference lists (front matter only — fast)")
     parser.add_argument("--enrich", action="store_true",
-                        help="augment with OpenAlex profiles (network calls)")
+                        help="force OpenAlex enrichment on (the default; "
+                             "overrides GRAPH_ENRICH=0)")
+    parser.add_argument("--no-enrich", action="store_true",
+                        help="skip OpenAlex — build with no network calls")
+    parser.add_argument("--enrich-all", action="store_true",
+                        help="enrich cited researchers too, not just corpus "
+                             "authors (thousands of requests — slow)")
+    parser.add_argument("--refresh-enrich", action="store_true",
+                        help="re-fetch OpenAlex profiles that are already "
+                             "present (citation counts move; the graph doesn't)")
     parser.add_argument("--no-html", action="store_true", help="skip the HTML viewer")
     args = parser.parse_args()
+
+    # --no-enrich wins over --enrich; both override the env default.
+    if args.no_enrich:
+        enrich = False
+    elif args.enrich or args.enrich_all or args.refresh_enrich:
+        enrich = True
+    else:
+        enrich = None
 
     build_graph(
         force=args.force,
         with_refs=not args.no_refs,
-        enrich=args.enrich,
+        enrich=enrich,
+        enrich_all=args.enrich_all or None,
+        refresh_enrich=args.refresh_enrich,
         export_html=not args.no_html,
     )
 
