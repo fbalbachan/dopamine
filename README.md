@@ -38,7 +38,7 @@ All code lives under [`crew/`](crew/).
        python -m crew.graph.interface --topic "Parkinson"          # who works on it                                                                                                                                         
        python -m crew.graph.interface --institution "Duke"         # who is there                                                                                                                                            
        python -m crew.graph.interface --stats                      # graph summary                                                                                                                                           
-       python -m crew.graph.interface -q "Who should Berke meet?"  # natural language    
+       python -m crew.graph.interface -q "Tell me something about the scientists GRAPH"  # natural language    
 > ```
 
 ---
